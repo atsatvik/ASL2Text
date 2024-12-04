@@ -29,7 +29,7 @@ def main():
 
     test_data = test_data.select(range(5))
     outputs, output_str, results = generate_rich_text(
-        test_data, model, tokenizer, max_source_length
+        test_data, model, tokenizer, max_source_length, compute_metrics=True
     )
     print("===============================================")
     for ip, op in zip(test_data, output_str):
