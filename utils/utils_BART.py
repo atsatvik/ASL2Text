@@ -10,6 +10,20 @@ from transformers import (
 )
 
 
+def init_experiment(args, config):
+    for arg, value in vars(args).items():
+        setattr(config, arg, value)
+
+    print("\n=========================================")
+    print("Experiment Settings:")
+    string = ""
+    for arg, value in vars(config).items():
+        string += f"({arg}: {value}) ; "
+    print(string[0:-2])
+    print("=========================================\n")
+    return config
+
+
 def load_model_tokenizer(model_name):
     model = AutoModelForSeq2SeqLM.from_pretrained(model_name)
     tokenizer = AutoTokenizer.from_pretrained(model_name)

@@ -1,0 +1,78 @@
+import transformers
+from datasets import load_dataset
+import yaml
+
+from transformers import (
+    AutoModelForSeq2SeqLM,
+    AutoTokenizer,
+    Seq2SeqTrainingArguments,
+    Seq2SeqTrainer,
+    DataCollatorForSeq2Seq,
+)
+
+from utils.T5_utils import *
+import nltk
+import argparse
+
+nltk.download("punkt", quiet=True)
+
+
+def dict2namespace(config):
+    namespace = argparse.Namespace()
+    for key, value in config.items():
+        if isinstance(value, dict):
+            new_value = dict2namespace(value)
+        else:
+            new_value = value
+        setattr(namespace, key, new_value)
+    return namespace
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(description="T5 train")
+    parser.add_argument(
+        "--config",
+        default="config/T5_config.yml",
+        type=str,
+        help="config file path",
+    )
+    args = parser.parse_args()
+
+    with open(args.config, "r") as f:
+        config = yaml.safe_load(f)
+    config = dict2namespace(config)
+    return args, config
+
+
+def main():
+    args, config = parse_args()
+    config = init_experiment(args, config)
+
+    model, tokenizer = load_model_tokenizer(model_name=config.model_name)
+    train_data, val_data, _ = load_data(dataset_name=config.dataset_name)
+
+    # Tokenize and preprocess data
+    train_data = train_data.map(
+        lambda batch: preprocess_examples(
+            batch, tokenizer, config.max_input_length, config.max_target_length
+        ),
+        batched=True,
+        remove_columns=train_data.column_names,
+    )
+    train_data.set_format(type="torch")
+
+    val_data = val_data.map(
+        lambda batch: preprocess_examples(
+            batch, tokenizer, config.max_input_length, config.max_target_length
+        ),
+        batched=True,
+        remove_columns=val_data.column_names,
+    )
+    val_data.set_format(type="torch")
+
+    train_dataloader, val_dataloader = create_dataloaders(train_data, val_data, config)
+    train_model(model, train_dataloader, val_dataloader, config)
+
+
+if __name__ == "__main__":
+    main()
