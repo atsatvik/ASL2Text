@@ -12,7 +12,7 @@ from transformers import (
     DataCollatorForSeq2Seq,
 )
 
-from utils.BART_utils import *
+from utils.utils_BART import *
 import nltk
 
 nltk.download("punkt", quiet=True)
@@ -33,7 +33,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description="BART train")
     parser.add_argument(
         "--config",
-        default="config/BART_config.yml",
+        default="config/config_BART.yml",
         type=str,
         help="config file path",
     )

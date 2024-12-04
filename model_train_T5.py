@@ -10,7 +10,7 @@ from transformers import (
     DataCollatorForSeq2Seq,
 )
 
-from utils.T5_utils import *
+from utils.utils_T5 import *
 import nltk
 import argparse
 
@@ -32,7 +32,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description="T5 train")
     parser.add_argument(
         "--config",
-        default="config/T5_config.yml",
+        default="config/config_T5.yml",
         type=str,
         help="config file path",
     )
