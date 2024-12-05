@@ -2,6 +2,8 @@ import transformers
 from datasets import load_dataset
 import shutil
 import os
+import nltk
+import evaluate
 
 from transformers import (
     AutoModelForSeq2SeqLM,
@@ -41,14 +43,15 @@ def prepare_log_dir(args):
     return exp_log_dir
 
 
-def init_experiment(args, config):
+def init_experiment(args, config, exp_type="train"):
     exp_log_dir = prepare_log_dir(args)
     args.output_dir = exp_log_dir
 
     for arg, value in vars(args).items():
         setattr(config, arg, value)
 
-    print(f"Saving log files to dir: {config.output_dir}")
+    if exp_type == "train":
+        print(f"Saving log files to dir: {config.output_dir}")
 
     print("\n=========================================")
     print("Experiment Settings:")
@@ -124,7 +127,7 @@ def postprocess_text(preds, labels):
 
 
 def compute_metrics(eval_preds, metric_name="rouge"):
-    metric = datasets.load_metric(metric_name)
+    metric = evaluate.load(metric_name)
 
     preds, labels = eval_preds
     if isinstance(preds, tuple):
@@ -166,27 +169,28 @@ def generate_rich_text(
     outputs = model.generate(input_ids, attention_mask=attention_mask)
     output_str = tokenizer.batch_decode(outputs, skip_special_tokens=True)
 
-    outputs, output_str = generate_rich_text(
-        test_data, model, tokenizer, encoder_max_length
-    )
     results = None
     if compute_metrics:
         preds, labels = postprocess_text(output_str, test_data["text"])
 
-        rouge = datasets.load_metric("rouge")
-        bleu = datasets.load_metric("bleu")
+        rouge = evaluate.load("rouge")
+        bleu = evaluate.load("bleu")
 
         # Compute ROUGE
         rouge_results = rouge.compute(
             predictions=preds, references=labels, use_stemmer=True
         )
-        rouge_results = {
-            key: value.mid.fmeasure * 100 for key, value in rouge_results.items()
-        }
 
         # Compute BLEU
         preds_tokens = [pred.split() for pred in preds]
         labels_tokens = [[label.split()] for label in labels]
-        bleu_results = bleu.compute(predictions=preds_tokens, references=labels_tokens)
+        preds_sentences = [" ".join(tokens) for tokens in preds_tokens]
+        references_sentences = [
+            [" ".join(ref) for ref in refs] for refs in labels_tokens
+        ]
+
+        bleu_results = bleu.compute(
+            predictions=preds_sentences, references=references_sentences
+        )
         results = {"rouge": rouge_results, "bleu": bleu_results}
     return outputs, output_str, results

@@ -8,6 +8,8 @@ import os
 from tqdm import tqdm
 from torch.utils.tensorboard import SummaryWriter
 import shutil
+import evaluate
+import nltk
 
 from transformers import (
     AutoModelForSeq2SeqLM,
@@ -49,14 +51,15 @@ def prepare_log_dir(args):
     return exp_log_dir
 
 
-def init_experiment(args, config):
+def init_experiment(args, config, exp_type="train"):
     exp_log_dir = prepare_log_dir(args)
     args.output_dir = exp_log_dir
 
     for arg, value in vars(args).items():
         setattr(config, arg, value)
 
-    print(f"Saving log files to dir: {config.output_dir}")
+    if exp_type == "train":
+        print(f"Saving log files to dir: {config.output_dir}")
 
     print("\n=========================================")
     print("Experiment Settings:")
@@ -137,7 +140,30 @@ def create_dataloaders(train_data, val_data, config):
     return train_dataloader, val_dataloader
 
 
-def train_model(model, train_dataloader, val_dataloader, config):
+def save_training_state(
+    base_path,
+    optimizer,
+    current_epoch,
+    global_step,
+    best_val_loss,
+):
+    print("Saving optimizer state")
+    torch.save(optimizer.state_dict(), os.path.join(base_path, "optimizer.pt"))
+
+    print("Saving RNG state...")
+    torch.save(torch.get_rng_state(), os.path.join(base_path, "rng_state.pth"))
+
+    print("Saving trainer state...")
+    trainer_state = {
+        "epoch": current_epoch,
+        "global_step": global_step,
+        "best_val_loss": best_val_loss,
+    }
+    torch.save(trainer_state, os.path.join(base_path, "trainer_state.json"))
+    print(f"All training state files saved to {base_path}")
+
+
+def train_model(model, tokenizer, train_dataloader, val_dataloader, config):
     # Initialize accelerator
     accelerator = Accelerator()
 
@@ -210,10 +236,16 @@ def train_model(model, train_dataloader, val_dataloader, config):
             epochs_no_improve = 0
             min_val_loss = val_loss
             # Save model when validation loss improves
+            pth = os.path.join(config.output_dir, "best_model")
             unwrapped_model = accelerator.unwrap_model(model)
-            unwrapped_model.save_pretrained(
-                os.path.join(config.output_dir, "best_model"),
-                save_function=accelerator.save,
+            unwrapped_model.save_pretrained(pth, save_function=accelerator.save)
+            tokenizer.save_pretrained(pth)
+            save_training_state(
+                base_path=pth,
+                optimizer=optimizer,
+                current_epoch=epoch,
+                global_step=global_step,
+                best_val_loss=min_val_loss,
             )
             continue
         else:
@@ -225,13 +257,29 @@ def train_model(model, train_dataloader, val_dataloader, config):
 
     # save trained model
     accelerator.wait_for_everyone()
+    pth = os.path.join(config.output_dir, "final_model")
     unwrapped_model = accelerator.unwrap_model(model)
-    # Use accelerator.save to save
-    unwrapped_model.save_pretrained(
-        os.path.join(config.output_dir, "final_model"),
-        save_function=accelerator.save,
+    unwrapped_model.save_pretrained(pth, save_function=accelerator.save)
+    tokenizer.save_pretrained(pth)
+    save_training_state(
+        base_path=pth,
+        optimizer=optimizer,
+        current_epoch=epoch,
+        global_step=global_step,
+        best_val_loss=min_val_loss,
     )
     writer.close()
+
+
+def postprocess_text(preds, labels):
+    preds = [pred.strip() for pred in preds]
+    labels = [label.strip() for label in labels]
+
+    # rougeLSum expects newline after each sentence
+    preds = ["\n".join(nltk.sent_tokenize(pred)) for pred in preds]
+    labels = ["\n".join(nltk.sent_tokenize(label)) for label in labels]
+
+    return preds, labels
 
 
 def generate_rich_text(
@@ -249,27 +297,28 @@ def generate_rich_text(
     outputs = model.generate(input_ids, attention_mask=attention_mask)
     output_str = tokenizer.batch_decode(outputs, skip_special_tokens=True)
 
-    outputs, output_str = generate_rich_text(
-        test_data, model, tokenizer, encoder_max_length
-    )
     results = None
     if compute_metrics:
         preds, labels = postprocess_text(output_str, test_data["text"])
 
-        rouge = datasets.load_metric("rouge")
-        bleu = datasets.load_metric("bleu")
+        rouge = evaluate.load("rouge")
+        bleu = evaluate.load("bleu")
 
         # Compute ROUGE
         rouge_results = rouge.compute(
             predictions=preds, references=labels, use_stemmer=True
         )
-        rouge_results = {
-            key: value.mid.fmeasure * 100 for key, value in rouge_results.items()
-        }
 
         # Compute BLEU
         preds_tokens = [pred.split() for pred in preds]
         labels_tokens = [[label.split()] for label in labels]
-        bleu_results = bleu.compute(predictions=preds_tokens, references=labels_tokens)
+        preds_sentences = [" ".join(tokens) for tokens in preds_tokens]
+        references_sentences = [
+            [" ".join(ref) for ref in refs] for refs in labels_tokens
+        ]
+
+        bleu_results = bleu.compute(
+            predictions=preds_sentences, references=references_sentences
+        )
         results = {"rouge": rouge_results, "bleu": bleu_results}
     return outputs, output_str, results

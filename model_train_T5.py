@@ -83,7 +83,7 @@ def main():
     val_data.set_format(type="torch")
 
     train_dataloader, val_dataloader = create_dataloaders(train_data, val_data, config)
-    train_model(model, train_dataloader, val_dataloader, config)
+    train_model(model, tokenizer, train_dataloader, val_dataloader, config)
 
 
 if __name__ == "__main__":

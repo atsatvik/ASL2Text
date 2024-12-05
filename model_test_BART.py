@@ -32,10 +32,22 @@ def dict2namespace(config):
 def parse_args():
     parser = argparse.ArgumentParser(description="BART train")
     parser.add_argument(
+        "--exp_name",
+        default="BART_train",
+        type=str,
+        help="experiment name",
+    )
+    parser.add_argument(
         "--config",
         default="config/config_BART.yml",
         type=str,
         help="config file path",
+    )
+    parser.add_argument(
+        "--output_dir",
+        default="results",
+        type=str,
+        help="output path to save weights and tensorboard logs",
     )
     parser.add_argument(
         "--resume",
@@ -66,8 +78,8 @@ def main():
     model = model.to(device)
 
     _, _, test_data = load_data(dataset_name="achrafothman/aslg_pc12")
-
     test_data = test_data.select(range(config.num_samples))
+
     outputs, output_str, results = generate_rich_text(
         test_data, model, tokenizer, config.max_source_length, compute_metrics=True
     )
