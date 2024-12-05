@@ -6,6 +6,8 @@ from accelerate import Accelerator
 from torch.utils.data import DataLoader
 import os
 from tqdm import tqdm
+from torch.utils.tensorboard import SummaryWriter
+import shutil
 
 from transformers import (
     AutoModelForSeq2SeqLM,
@@ -18,9 +20,43 @@ from transformers import (
 )
 
 
+def prepare_log_dir(args):
+    if not os.path.exists(args.output_dir):
+        os.makedirs(args.output_dir)
+
+    exp_dir = os.path.join(args.output_dir, args.exp_name)
+    if not os.path.exists(exp_dir):
+        os.makedirs(exp_dir)
+
+    exp_dir_folder_ls = os.listdir(exp_dir)
+    if not exp_dir_folder_ls:
+        exp_log_dir = os.path.join(exp_dir, f"{0}")
+        os.makedirs(exp_log_dir)
+    else:
+        ls = []
+        for i in range(len(exp_dir_folder_ls)):
+            try:
+                ls.append(int(exp_dir_folder_ls[i]))
+            except:
+                continue
+        exp_dir_folder_ls = ls
+        exp_dir_folder_ls.sort()
+        exp_log_dir = os.path.join(exp_dir, f"{int(exp_dir_folder_ls[-1]) + 1}")
+        os.makedirs(exp_log_dir)
+
+    config_file_path = args.config
+    shutil.copy(config_file_path, os.path.join(exp_log_dir, "config_T5.yml"))
+    return exp_log_dir
+
+
 def init_experiment(args, config):
+    exp_log_dir = prepare_log_dir(args)
+    args.output_dir = exp_log_dir
+
     for arg, value in vars(args).items():
         setattr(config, arg, value)
+
+    print(f"Saving log files to dir: {config.output_dir}")
 
     print("\n=========================================")
     print("Experiment Settings:")
@@ -129,13 +165,16 @@ def train_model(model, train_dataloader, val_dataloader, config):
     # Now we train the model
     epochs_no_improve = 0
     min_val_loss = float("inf")
+
+    writer = SummaryWriter(log_dir=config.output_dir)
+
     for epoch in range(config.num_epochs):
         progress_bar = tqdm(
             range(len(train_dataloader)), disable=not accelerator.is_main_process
         )
         progress_bar.set_description(f"Epoch: {epoch}")
         model.train()
-        for batch in train_dataloader:
+        for i, batch in enumerate(train_dataloader):
             outputs = model(**batch)
             loss = outputs.loss
             accelerator.backward(loss)
@@ -144,10 +183,15 @@ def train_model(model, train_dataloader, val_dataloader, config):
             optimizer.zero_grad()
             progress_bar.set_postfix({"loss": loss.item()})
             progress_bar.update(1)
+            global_step = (
+                epoch * len(train_dataloader) + progress_bar.n
+            )  # Calculate global step
+            if i % config.logging_steps == 0:
+                writer.add_scalar("train/Loss", loss.item(), global_step)
 
         model.eval()
         validation_losses = []
-        for batch in val_dataloader:
+        for i, batch in tqdm(enumerate(val_dataloader), desc="Running Validation"):
             with torch.no_grad():
                 outputs = model(**batch)
             loss = outputs.loss
@@ -156,6 +200,10 @@ def train_model(model, train_dataloader, val_dataloader, config):
 
         # Compute average validation loss
         val_loss = torch.stack(validation_losses).sum().item() / len(validation_losses)
+
+        # log val loss
+        writer.add_scalar("validation/Loss", val_loss, epoch)
+
         # Use accelerator.print to print only on the main process.
         accelerator.print(f"epoch {epoch}: validation loss:", val_loss)
         if val_loss < min_val_loss:
@@ -183,6 +231,7 @@ def train_model(model, train_dataloader, val_dataloader, config):
         os.path.join(config.output_dir, "final_model"),
         save_function=accelerator.save,
     )
+    writer.close()
 
 
 def generate_rich_text(

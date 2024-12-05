@@ -31,10 +31,22 @@ def dict2namespace(config):
 def parse_args():
     parser = argparse.ArgumentParser(description="T5 train")
     parser.add_argument(
+        "--exp_name",
+        default="T5_train",
+        type=str,
+        help="experiment name",
+    )
+    parser.add_argument(
         "--config",
         default="config/config_T5.yml",
         type=str,
         help="config file path",
+    )
+    parser.add_argument(
+        "--output_dir",
+        default="results",
+        type=str,
+        help="output path to save weights and tensorboard logs",
     )
     args = parser.parse_args()
 

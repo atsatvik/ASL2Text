@@ -31,11 +31,24 @@ def dict2namespace(config):
 def parse_args():
     parser = argparse.ArgumentParser(description="BART train")
     parser.add_argument(
+        "--exp_name",
+        default="BART_train",
+        type=str,
+        help="experiment name",
+    )
+    parser.add_argument(
         "--config",
         default="config/config_BART.yml",
         type=str,
         help="config file path",
     )
+    parser.add_argument(
+        "--output_dir",
+        default="results",
+        type=str,
+        help="output path to save weights and tensorboard logs",
+    )
+
     args = parser.parse_args()
 
     with open(args.config, "r") as f:
@@ -79,10 +92,11 @@ def main():
         weight_decay=config.weight_decay,
         label_smoothing_factor=config.label_smoothing_factor,
         predict_with_generate=config.predict_with_generate,
-        logging_dir=config.logging_dir,
+        logging_dir=config.output_dir,
         logging_steps=config.logging_steps,
         save_strategy=config.save_strategy,
         save_total_limit=config.save_total_limit,
+        eval_strategy=config.evaluation_strategy,
     )
 
     data_collator = DataCollatorForSeq2Seq(tokenizer, model=model)
