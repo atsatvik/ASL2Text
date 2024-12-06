@@ -48,6 +48,12 @@ def parse_args():
         type=str,
         help="output path to save weights and tensorboard logs",
     )
+    parser.add_argument(
+        "--resume",
+        default=None,
+        type=str,
+        help="resume training from checkpoint",
+    )
     args = parser.parse_args()
 
     with open(args.config, "r") as f:
@@ -59,6 +65,9 @@ def parse_args():
 def main():
     args, config = parse_args()
     config = init_experiment(args, config)
+
+    if config.resume:
+        config.model_name = config.resume
 
     model, tokenizer = load_model_tokenizer(model_name=config.model_name)
     train_data, val_data, _ = load_data(dataset_name=config.dataset_name)
