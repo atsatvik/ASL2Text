@@ -106,6 +106,8 @@ def main():
         save_strategy=config.save_strategy,
         save_total_limit=config.save_total_limit,
         eval_strategy=config.evaluation_strategy,
+        metric_for_best_model=config.metric_for_best_model,
+        greater_is_better=config.greater_is_better,
     )
 
     data_collator = DataCollatorForSeq2Seq(tokenizer, model=model)
