@@ -4,6 +4,7 @@ import shutil
 import os
 import nltk
 import evaluate
+import numpy as np
 
 from transformers import (
     AutoModelForSeq2SeqLM,
@@ -126,32 +127,47 @@ def postprocess_text(preds, labels):
     return preds, labels
 
 
-def compute_metrics(eval_preds, metric_name="rouge"):
-    metric = evaluate.load(metric_name)
+def make_compute_metrics(tokenizer):
+    def compute_metrics(eval_preds):
+        metric_rogue = evaluate.load("rouge")
+        metric_bleu = evaluate.load("bleu")
 
-    preds, labels = eval_preds
-    if isinstance(preds, tuple):
-        preds = preds[0]
-    decoded_preds = tokenizer.batch_decode(preds, skip_special_tokens=True)
-    # Replace -100 in the labels as we can't decode them.
-    labels = np.where(labels != -100, labels, tokenizer.pad_token_id)
-    decoded_labels = tokenizer.batch_decode(labels, skip_special_tokens=True)
+        preds, labels = eval_preds
+        if isinstance(preds, tuple):
+            preds = preds[0]
+        decoded_preds = tokenizer.batch_decode(preds, skip_special_tokens=True)
+        # Replace -100 in the labels as we can't decode them.
+        labels = np.where(labels != -100, labels, tokenizer.pad_token_id)
+        decoded_labels = tokenizer.batch_decode(labels, skip_special_tokens=True)
 
-    # Some simple post-processing
-    decoded_preds, decoded_labels = postprocess_text(decoded_preds, decoded_labels)
+        # Some simple post-processing
+        decoded_preds, decoded_labels = postprocess_text(decoded_preds, decoded_labels)
 
-    result = metric.compute(
-        predictions=decoded_preds, references=decoded_labels, use_stemmer=True
-    )
-    # Extract a few results from ROUGE
-    result = {key: value.mid.fmeasure * 100 for key, value in result.items()}
+        result = metric_rogue.compute(
+            predictions=decoded_preds, references=decoded_labels, use_stemmer=True
+        )
 
-    prediction_lens = [
-        np.count_nonzero(pred != tokenizer.pad_token_id) for pred in preds
-    ]
-    result["gen_len"] = np.mean(prediction_lens)
-    result = {k: round(v, 4) for k, v in result.items()}
-    return result
+        prediction_lens = [
+            np.count_nonzero(pred != tokenizer.pad_token_id) for pred in preds
+        ]
+        result["gen_len"] = np.mean(prediction_lens)
+
+        # Compute BLEU
+        preds_tokens = [pred.split() for pred in decoded_preds]
+        labels_tokens = [[label.split()] for label in decoded_labels]
+        preds_sentences = [" ".join(tokens) for tokens in preds_tokens]
+        references_sentences = [
+            [" ".join(ref) for ref in refs] for refs in labels_tokens
+        ]
+
+        bleu_results = metric_bleu.compute(
+            predictions=preds_sentences, references=references_sentences
+        )["bleu"]
+        result["bleu"] = bleu_results
+        result = {k: round(v, 4) for k, v in result.items()}
+        return result
+
+    return compute_metrics
 
 
 def generate_rich_text(

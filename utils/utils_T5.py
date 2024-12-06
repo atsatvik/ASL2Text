@@ -10,6 +10,7 @@ from torch.utils.tensorboard import SummaryWriter
 import shutil
 import evaluate
 import nltk
+import numpy as np
 
 from transformers import (
     AutoModelForSeq2SeqLM,
@@ -163,6 +164,43 @@ def save_training_state(
     print(f"All training state files saved to {base_path}")
 
 
+def compute_metrics(preds, labels, tokenizer):
+    metric_rogue = evaluate.load("rouge")
+    metric_bleu = evaluate.load("bleu")
+
+    if isinstance(preds, tuple):
+        preds = preds[0]
+    decoded_preds = tokenizer.batch_decode(preds, skip_special_tokens=True)
+    # Replace -100 in the labels as we can't decode them.
+    labels = np.where(labels != -100, labels, tokenizer.pad_token_id)
+    decoded_labels = tokenizer.batch_decode(labels, skip_special_tokens=True)
+
+    # Some simple post-processing
+    decoded_preds, decoded_labels = postprocess_text(decoded_preds, decoded_labels)
+
+    result = metric_rogue.compute(
+        predictions=decoded_preds, references=decoded_labels, use_stemmer=True
+    )
+
+    prediction_lens = [
+        np.count_nonzero(pred != tokenizer.pad_token_id) for pred in preds
+    ]
+    result["gen_len"] = np.mean(prediction_lens)
+
+    # Compute BLEU
+    preds_tokens = [pred.split() for pred in decoded_preds]
+    labels_tokens = [[label.split()] for label in decoded_labels]
+    preds_sentences = [" ".join(tokens) for tokens in preds_tokens]
+    references_sentences = [[" ".join(ref) for ref in refs] for refs in labels_tokens]
+    bleu_results = metric_bleu.compute(
+        predictions=preds_sentences, references=references_sentences
+    )["bleu"]
+    result["bleu"] = bleu_results
+
+    result = {k: round(v, 4) for k, v in result.items()}
+    return result
+
+
 def train_model(model, tokenizer, train_dataloader, val_dataloader, config):
     # Initialize accelerator
     accelerator = Accelerator()
@@ -213,22 +251,45 @@ def train_model(model, tokenizer, train_dataloader, val_dataloader, config):
                 epoch * len(train_dataloader) + progress_bar.n
             )  # Calculate global step
             if i % config.logging_steps == 0:
-                writer.add_scalar("train/Loss", loss.item(), global_step)
+                writer.add_scalar("train/loss", loss.item(), global_step)
 
         model.eval()
         validation_losses = []
+        cumulative_results = {
+            "rouge1": 0.0,
+            "rouge2": 0.0,
+            "rougeL": 0.0,
+            "rougeLsum": 0.0,
+            "bleu": 0.0,
+            "gen_len": 0.0,
+        }
         for i, batch in tqdm(enumerate(val_dataloader), desc="Running Validation"):
             with torch.no_grad():
+                # loss
                 outputs = model(**batch)
+                # rouge values
+                input_ids = batch["input_ids"].to(model.device)
+                attention_mask = batch["attention_mask"].to(model.device)
+                gen_outputs = model.generate(
+                    input_ids, attention_mask=attention_mask
+                ).to("cpu")
+                labels = batch["labels"].to("cpu")
+                results = compute_metrics(gen_outputs, labels, tokenizer)
+
             loss = outputs.loss
-
             validation_losses.append(accelerator.gather(loss[None]))
+            for key in cumulative_results.keys():
+                cumulative_results[key] += results[key]
 
-        # Compute average validation loss
         val_loss = torch.stack(validation_losses).sum().item() / len(validation_losses)
+        writer.add_scalar("eval/loss", val_loss, global_step)
 
-        # log val loss
-        writer.add_scalar("validation/Loss", val_loss, epoch)
+        cumulative_results = {
+            key: value / len(validation_losses)
+            for key, value in cumulative_results.items()
+        }
+        for key, val in cumulative_results.items():
+            writer.add_scalar(f"eval/{key}", val, global_step)
 
         # Use accelerator.print to print only on the main process.
         accelerator.print(f"epoch {epoch}: validation loss:", val_loss)

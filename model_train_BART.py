@@ -108,7 +108,7 @@ def main():
         train_dataset=train_data,
         eval_dataset=val_data,
         tokenizer=tokenizer,
-        compute_metrics=compute_metrics,
+        compute_metrics=make_compute_metrics(tokenizer),
     )
 
     trainer.train()
