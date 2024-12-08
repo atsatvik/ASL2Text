@@ -22,7 +22,7 @@ Our methodology includes:
 Follow the steps below to set up the repository on your local machine.
 
    ```bash
-   git clone [<git-repo-url>](https://github.com/atsatvik/ASL2Text.git)
+   git clone https://github.com/atsatvik/ASL2Text.git
    cd ASL2Text
    pip install -r requirements.txt
   ```
