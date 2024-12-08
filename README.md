@@ -10,7 +10,6 @@ Using the **ASLG-PC12 dataset**, which contains annotated ASL glosses paired wit
 Our methodology includes:
 - **Model Training & Fine-tuning**: We train BART and T5 models using PyTorch. 
 - **Performance Analysis**: We compare models both **qualitatively and quantitatively** on standard NLP metrics.
-- **Integration Possibilities**: We explore how this work can be extended into a full ASL-to-text system by integrating it with a video-to-gloss subsystem.
 
 
 ## **Project Objectives**
