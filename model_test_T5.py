@@ -1,6 +1,7 @@
 import transformers
 from datasets import load_dataset
 import yaml
+import json
 
 from transformers import (
     AutoModelForSeq2SeqLM,
@@ -32,7 +33,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description="T5 train")
     parser.add_argument(
         "--exp_name",
-        default="T5_train",
+        default="T5_test",
         type=str,
         help="experiment name",
     )
@@ -44,7 +45,7 @@ def parse_args():
     )
     parser.add_argument(
         "--output_dir",
-        default="results",
+        default="inference_results",
         type=str,
         help="output path to save weights and tensorboard logs",
     )
@@ -77,18 +78,32 @@ def main():
     model = model.to(device)
 
     _, _, test_data = load_data(dataset_name=config.dataset_name)
-    test_data = test_data.select(range(config.num_samples))
+    test_data = test_data.map(
+        lambda batch: preprocess_examples(
+            batch, tokenizer, config.max_input_length, config.max_target_length
+        ),
+        batched=True,
+        remove_columns=test_data.column_names,
+    )
+    test_data.set_format(type="torch")
 
-    outputs, output_str, results = generate_rich_text(
-        test_data, model, tokenizer, config.max_input_length, compute_metrics=True
+    test_dataloader = get_dataloader(test_data, config.eval_batch_size)
+
+    outputs, predictions, results, long_examples = generate_rich_text(
+        test_dataloader, model, tokenizer, config.max_input_length, compute_metrics=True
     )
 
-    print("===============================================")
-    for ip, op in zip(test_data, output_str):
-        print("Input: " + ip["gloss"] + "GT: " + ip["text"] + "Output: " + op)
-        print("===============================================")
+    txt_file = os.path.join(config.output_dir, "results.txt")
+    with open(txt_file, "w") as f:
+        f.write("\n--- Test Set Metrics ---\n")
+        f.write(json.dumps(results, indent=4))
 
-    print(results)
+        f.write("\n--- 10 Long Examples ---\n")
+        for example in long_examples:
+            f.write(f"Gloss: {example['gloss']}\n")
+            f.write(f"Ground Truth: {example['ground_truth']}\n")
+            f.write(f"Prediction: {example['prediction']}\n")
+            f.write("===============================================\n")
 
 
 if __name__ == "__main__":

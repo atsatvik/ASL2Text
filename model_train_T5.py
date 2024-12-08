@@ -91,7 +91,9 @@ def main():
     )
     val_data.set_format(type="torch")
 
-    train_dataloader, val_dataloader = create_dataloaders(train_data, val_data, config)
+    train_dataloader = get_dataloader(train_data, config.train_batch_size)
+    val_dataloader = get_dataloader(val_data, config.eval_batch_size)
+
     train_model(model, tokenizer, train_dataloader, val_dataloader, config)
 
 
